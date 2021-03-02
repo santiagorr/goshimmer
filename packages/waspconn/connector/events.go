@@ -1,4 +1,4 @@
-package connector
+// +build ignorepackage connector
 
 import (
 	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"

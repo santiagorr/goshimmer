@@ -1,4 +1,4 @@
-package utxodb
+// +build ignorepackage utxodb
 
 import (
 	"fmt"

@@ -1,4 +1,4 @@
-package valuetangle
+// +build ignorepackage valuetangle
 
 import (
 	"fmt"

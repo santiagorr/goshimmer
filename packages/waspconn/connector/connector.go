@@ -1,4 +1,4 @@
-package connector
+// +build ignorepackage connector
 
 import (
 	"io"

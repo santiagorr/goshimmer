@@ -1,57 +1,94 @@
 package utxodb
 
 import (
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/address"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/address/signaturescheme"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/balance"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
+	"sync"
+	"time"
+
+	"github.com/iotaledger/goshimmer/packages/ledgerstate"
+	"github.com/iotaledger/goshimmer/packages/waspconn/txutil"
 	"github.com/iotaledger/hive.go/crypto/ed25519"
-	"github.com/mr-tron/base58"
+	"github.com/iotaledger/hive.go/identity"
 )
 
 const (
-	supply = int64(100 * 1000 * 1000 * 1000)
+	supply          = uint64(100 * 1000 * 1000)
+	genesisIndex    = 31415
+	manaPledgeIndex = 271828
 )
 
 var (
-	genesisSigScheme = NewSigScheme("EFonzaUz5ngYeDxbRKu8qV5aoSogUQ5qVSTSjn7hJ8FQ", 0)
+	seed           = ed25519.NewSeed([]byte("EFonzaUz5ngYeDxbRKu8qV5aoSogUQ5qVSTSjn7hJ8FQ"))
+	genesisKeyPair = NewKeyPairFromSeed(genesisIndex)
+	essenceVersion = ledgerstate.TransactionEssenceVersion(0)
 )
 
-// NewSigScheme creates new random Ed25519 signature scheme
-func NewSigScheme(seedStr string, index int) signaturescheme.SignatureScheme {
-	seedBin, err := base58.Decode(seedStr)
-	if err != nil {
-		panic(err)
+// UtxoDB is the structure which contains all UTXODB transactions and ledger
+type UtxoDB struct {
+	genesisKeyPair *ed25519.KeyPair
+	transactions   map[ledgerstate.TransactionID]*ledgerstate.Transaction
+	utxo           map[ledgerstate.OutputID]ledgerstate.Output
+	mutex          *sync.RWMutex
+	genesisTxId    ledgerstate.TransactionID
+}
+
+// New creates new UTXODB instance
+func New() *UtxoDB {
+	u := &UtxoDB{
+		genesisKeyPair: genesisKeyPair,
+		transactions:   make(map[ledgerstate.TransactionID]*ledgerstate.Transaction),
+		utxo:           make(map[ledgerstate.OutputID]ledgerstate.Output),
+		mutex:          &sync.RWMutex{},
 	}
-	seed := ed25519.NewSeed(seedBin)
-	keyPair := seed.KeyPair(uint64(index))
-	return signaturescheme.ED25519(*keyPair)
+	u.genesisInit()
+	return u
+}
+
+func NewKeyPairFromSeed(index int) *ed25519.KeyPair {
+	return seed.KeyPair(uint64(index))
 }
 
 func (u *UtxoDB) genesisInit() {
 	// create genesis transaction
-	genesisAddr := u.GetGenesisAddress()
-	genesisInput := transaction.NewOutputID(genesisAddr, transaction.ID{})
-	inputs := transaction.NewInputs(genesisInput)
-	outputs := transaction.NewOutputs(map[address.Address][]*balance.Balance{
-		genesisAddr: {balance.New(balance.ColorIOTA, supply)},
-	})
-	genesisTx := transaction.New(inputs, outputs)
-	genesisTx.Sign(u.GetGenesisSigScheme())
+	inputs := ledgerstate.NewInputs(ledgerstate.NewUTXOInput(ledgerstate.NewOutputID(ledgerstate.TransactionID{}, 0)))
+	output := ledgerstate.NewSigLockedSingleOutput(supply, u.GetGenesisAddress())
+	outputs := ledgerstate.NewOutputs(output)
+	essence := ledgerstate.NewTransactionEssence(essenceVersion, time.Now(), identity.ID{}, identity.ID{}, inputs, outputs)
+	signature := ledgerstate.NewED25519Signature(u.genesisKeyPair.PublicKey, u.genesisKeyPair.PrivateKey.Sign(essence.Bytes()))
+	unlockBlock := ledgerstate.NewSignatureUnlockBlock(signature)
+	genesisTx := ledgerstate.NewTransaction(essence, ledgerstate.UnlockBlocks{unlockBlock})
 
 	u.genesisTxId = genesisTx.ID()
-
 	u.transactions[u.genesisTxId] = genesisTx
-	u.utxo[transaction.NewOutputID(genesisAddr, u.genesisTxId)] = true
-	u.utxoByAddress[genesisAddr] = []transaction.ID{u.genesisTxId}
+	u.utxo[output.ID()] = output.Clone()
 }
 
 // GetGenesisSigScheme return signature scheme used by creator of genesis
-func (u *UtxoDB) GetGenesisSigScheme() signaturescheme.SignatureScheme {
-	return genesisSigScheme
+func (u *UtxoDB) GetGenesisKeyPair() *ed25519.KeyPair {
+	return genesisKeyPair
 }
 
 // GetGenesisAddress return address of genesis
-func (u *UtxoDB) GetGenesisAddress() address.Address {
-	return genesisSigScheme.Address()
+func (u *UtxoDB) GetGenesisAddress() ledgerstate.Address {
+	return ledgerstate.NewED25519Address(genesisKeyPair.PublicKey)
+}
+
+const RequestFundsAmount = 1337 // same as Goshimmer Faucet
+
+func (u *UtxoDB) mustRequestFundsTx(target ledgerstate.Address) *ledgerstate.Transaction {
+	sourceOutputs := u.GetAddressOutputs(u.GetGenesisAddress())
+	builder := txutil.NewBuilder(sourceOutputs)
+	if _, err := builder.AddIOTAOutput(target, RequestFundsAmount); err != nil {
+		panic(err)
+	}
+	ret, err := builder.BuildWithED25519(u.genesisKeyPair)
+	if err != nil {
+		panic(err)
+	}
+	return ret
+}
+
+// RequestFunds implements faucet: it sends 1337 IOTA tokens from genesis to the given address.
+func (u *UtxoDB) RequestFunds(target ledgerstate.Address) (*ledgerstate.Transaction, error) {
+	tx := u.mustRequestFundsTx(target)
+	return tx, u.AddTransaction(tx)
 }
