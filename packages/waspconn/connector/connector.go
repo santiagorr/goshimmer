@@ -1,18 +1,19 @@
-// +build ignorepackage connector
+// +build ignore
+package connector
 
 import (
 	"io"
 	"net"
 	"strings"
 
+	"github.com/iotaledger/goshimmer/packages/shutdown"
+	"github.com/iotaledger/goshimmer/packages/tangle"
 	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/address"
 	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/balance"
 	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
+	"github.com/iotaledger/goshimmer/packages/waspconn"
 	"github.com/iotaledger/goshimmer/packages/waspconn/chopper"
 	"github.com/iotaledger/goshimmer/packages/waspconn/valuetangle"
-	"github.com/iotaledger/goshimmer/packages/waspconn"
-	"github.com/iotaledger/goshimmer/packages/shutdown"
-	"github.com/iotaledger/goshimmer/packages/tangle"
 	"github.com/iotaledger/hive.go/daemon"
 	"github.com/iotaledger/hive.go/events"
 	"github.com/iotaledger/hive.go/logger"

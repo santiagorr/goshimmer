@@ -1,4 +1,5 @@
-// +build ignorepackage connector
+// +build ignore
+package connector
 
 // Copyright 2020 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
@@ -6,11 +7,11 @@
 import (
 	"io"
 
+	"github.com/iotaledger/goshimmer/packages/tangle"
 	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/address"
 	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/balance"
 	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
 	"github.com/iotaledger/goshimmer/packages/waspconn"
-	"github.com/iotaledger/goshimmer/packages/tangle"
 )
 
 func (wconn *WaspConnector) sendMsgToWasp(msg interface{ Write(io.Writer) error }) error {

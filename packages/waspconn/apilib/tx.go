@@ -1,4 +1,5 @@
-// +build ignorepackage apilib
+// +build ignore
+package apilib
 
 import (
 	"bytes"

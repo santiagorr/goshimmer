@@ -1,4 +1,5 @@
-// +build ignorepackage waspconn
+// +build ignore
+package waspconn
 
 import (
 	"fmt"
@@ -6,12 +7,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iotaledger/goshimmer/packages/shutdown"
 	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
 	"github.com/iotaledger/goshimmer/packages/waspconn/connector"
 	"github.com/iotaledger/goshimmer/packages/waspconn/testing"
 	"github.com/iotaledger/goshimmer/packages/waspconn/utxodb"
 	"github.com/iotaledger/goshimmer/packages/waspconn/valuetangle"
-	"github.com/iotaledger/goshimmer/packages/shutdown"
 	"github.com/iotaledger/goshimmer/plugins/config"
 	"github.com/iotaledger/hive.go/daemon"
 	"github.com/iotaledger/hive.go/logger"

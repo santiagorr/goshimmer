@@ -1,4 +1,5 @@
-// +build ignorepackage waspconn
+// +build ignore
+package waspconn
 
 import (
 	"encoding/binary"
