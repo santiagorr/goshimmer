@@ -1,4 +1,3 @@
-// +build ignore
 package apilib
 
 import (
@@ -6,13 +5,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/address"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/balance"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
+	"github.com/iotaledger/goshimmer/packages/ledgerstate"
 )
 
 type OutputBalance struct {
-	Value int64  `json:"value"`
+	Value uint64 `json:"value"`
 	Color string `json:"color"` // base58
 }
 
@@ -22,8 +19,8 @@ type GetAccountOutputsResponse struct {
 	Err     string                     `json:"err"`
 }
 
-func GetAccountOutputs(netLoc string, address *address.Address) (map[transaction.OutputID][]*balance.Balance, error) {
-	url := fmt.Sprintf("http://%s/utxodb/outputs/%s", netLoc, address.String())
+func GetAccountOutputs(netLoc string, address ledgerstate.Address) (map[ledgerstate.OutputID]*ledgerstate.ColoredBalances, error) {
+	url := fmt.Sprintf("http://%s/utxodb/outputs/%s", netLoc, address.Base58())
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
@@ -37,21 +34,21 @@ func GetAccountOutputs(netLoc string, address *address.Address) (map[transaction
 		return nil, fmt.Errorf("%s returned code %d: %s", url, resp.StatusCode, res.Err)
 	}
 
-	outputs := make(map[transaction.OutputID][]*balance.Balance)
+	outputs := make(map[ledgerstate.OutputID]*ledgerstate.ColoredBalances)
 	for k, v := range res.Outputs {
-		id, err := transaction.OutputIDFromBase58(k)
+		id, err := ledgerstate.OutputIDFromBase58(k)
 		if err != nil {
 			return nil, err
 		}
-		balances := make([]*balance.Balance, len(v))
-		for i, b := range v {
-			color, err := transaction.IDFromBase58(b.Color)
+		balances := make(map[ledgerstate.Color]uint64)
+		for _, b := range v {
+			color, err := ledgerstate.ColorFromBase58EncodedString(b.Color)
 			if err != nil {
 				return nil, err
 			}
-			balances[i] = balance.New(balance.Color(color), b.Value)
+			balances[color] = b.Value
 		}
-		outputs[id] = balances
+		outputs[id] = ledgerstate.NewColoredBalances(balances)
 	}
 	return outputs, nil
 }

@@ -1,4 +1,4 @@
-// package to help to split messages into smaller pieces and reassemble them
+// Package chopper helps splitting messages into smaller pieces and reassemble them
 package chopper
 
 // Copyright 2020 IOTA Stiftung
@@ -19,7 +19,7 @@ const (
 )
 
 type Chopper struct {
-	nextId  uint32
+	nextID  uint32
 	mutex   *sync.Mutex
 	chunks  map[uint32]*dataInProgress
 	closeCh chan bool
@@ -33,7 +33,7 @@ type dataInProgress struct {
 
 func NewChopper() *Chopper {
 	c := Chopper{
-		nextId:  0,
+		nextID:  0,
 		mutex:   &sync.Mutex{},
 		chunks:  make(map[uint32]*dataInProgress),
 		closeCh: make(chan bool),
@@ -71,8 +71,8 @@ func (c *Chopper) cleanupLoop() {
 func (c *Chopper) getNextMsgId() uint32 {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	c.nextId++
-	return c.nextId
+	c.nextID++
+	return c.nextID
 }
 
 func NumChunks(dataLen, maxMsgSize, includingChoppingOverhead int) (byte, int, error) {

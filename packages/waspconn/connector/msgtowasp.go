@@ -1,24 +1,16 @@
-// +build ignore
 package connector
 
 // Copyright 2020 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
 import (
-	"io"
-
+	"github.com/iotaledger/goshimmer/packages/ledgerstate"
 	"github.com/iotaledger/goshimmer/packages/tangle"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/address"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/balance"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
 	"github.com/iotaledger/goshimmer/packages/waspconn"
 )
 
-func (wconn *WaspConnector) sendMsgToWasp(msg interface{ Write(io.Writer) error }) error {
-	data, err := waspconn.EncodeMsg(msg)
-	if err != nil {
-		return err
-	}
+func (wconn *WaspConnector) sendMsgToWasp(msg waspconn.Message) error {
+	data := waspconn.EncodeMsg(msg)
 	choppedData, chopped, err := wconn.messageChopper.ChopData(data, tangle.MaxMessageSize, waspconn.ChunkMessageHeaderSize)
 	if err != nil {
 		return err
@@ -32,7 +24,7 @@ func (wconn *WaspConnector) sendMsgToWasp(msg interface{ Write(io.Writer) error 
 
 	// sending piece by piece wrapped in WaspMsgChunk
 	for _, piece := range choppedData {
-		dataToSend, err := waspconn.EncodeMsg(&waspconn.WaspMsgChunk{
+		dataToSend := waspconn.EncodeMsg(&waspconn.WaspMsgChunk{
 			Data: piece,
 		})
 		if err != nil {
@@ -49,42 +41,38 @@ func (wconn *WaspConnector) sendMsgToWasp(msg interface{ Write(io.Writer) error 
 	return nil
 }
 
-func (wconn *WaspConnector) sendConfirmedTransactionToWasp(vtx *transaction.Transaction) error {
+func (wconn *WaspConnector) sendConfirmedTransactionToWasp(vtx *ledgerstate.Transaction) error {
 	return wconn.sendMsgToWasp(&waspconn.WaspFromNodeConfirmedTransactionMsg{
 		Tx: vtx,
 	})
 }
 
-func (wconn *WaspConnector) sendAddressUpdateToWasp(addr *address.Address, balances map[transaction.ID][]*balance.Balance, tx *transaction.Transaction) error {
+func (wconn *WaspConnector) sendAddressUpdateToWasp(addr ledgerstate.Address, balances map[ledgerstate.TransactionID]*ledgerstate.ColoredBalances, tx *ledgerstate.Transaction) error {
 	return wconn.sendMsgToWasp(&waspconn.WaspFromNodeAddressUpdateMsg{
-		Address:  *addr,
+		Address:  addr,
 		Balances: balances,
 		Tx:       tx,
 	})
 }
 
-func (wconn *WaspConnector) sendAddressOutputsToWasp(address *address.Address, balances map[transaction.ID][]*balance.Balance) error {
+func (wconn *WaspConnector) sendAddressOutputsToWasp(address ledgerstate.Address, balances map[ledgerstate.TransactionID]*ledgerstate.ColoredBalances) error {
 	return wconn.sendMsgToWasp(&waspconn.WaspFromNodeAddressOutputsMsg{
-		Address:  *address,
+		Address:  address,
 		Balances: balances,
 	})
 }
 
-func (wconn *WaspConnector) sendTxInclusionLevelToWasp(inclLevel byte, txid *transaction.ID, addrs []address.Address) error {
-	return wconn.sendMsgToWasp(&waspconn.WaspFromNodeTransactionInclusionLevelMsg{
-		Level:               inclLevel,
-		TxId:                *txid,
+func (wconn *WaspConnector) sendBranchInclusionStateToWasp(state ledgerstate.InclusionState, txid ledgerstate.TransactionID, addrs []ledgerstate.Address) error {
+	return wconn.sendMsgToWasp(&waspconn.WaspFromNodeBranchInclusionStateMsg{
+		State:               state,
+		TxId:                txid,
 		SubscribedAddresses: addrs,
 	})
 }
 
 // query outputs database and collects transactions containing unprocessed requests
-func (wconn *WaspConnector) pushBacklogToWasp(addr *address.Address, scColor *balance.Color) {
-	outs, err := wconn.vtangle.GetConfirmedAddressOutputs(*addr)
-	if err != nil {
-		wconn.log.Errorf("pushBacklogToWasp: %v", err)
-		return
-	}
+func (wconn *WaspConnector) pushBacklogToWasp(addr ledgerstate.Address, scColor *ledgerstate.Color) {
+	outs := wconn.vtangle.GetAddressOutputs(addr)
 	if len(outs) == 0 {
 		return
 	}
@@ -97,40 +85,45 @@ func (wconn *WaspConnector) pushBacklogToWasp(addr *address.Address, scColor *ba
 	wconn.log.Debugf("pushBacklogToWasp: balancesByTx of addr %s by color:\n%s",
 		addr.String(), waspconn.BalancesByColorToString(balancesByColor))
 
-	allColorsAsTxid := make([]transaction.ID, 0, len(balancesByColor))
+	allColorsAsTxid := make([]ledgerstate.TransactionID, 0, len(balancesByColor))
 	for col, b := range balancesByColor {
-		if col == balance.ColorIOTA {
+		if col == ledgerstate.ColorIOTA {
 			continue
 		}
-		if col == balance.ColorNew {
-			wconn.log.Warnf("pushBacklogToWasp: unexpected ColorNew encountered in the balancesByTx of address %s", addr.String())
+		if col == ledgerstate.ColorMint {
+			wconn.log.Warnf("pushBacklogToWasp: unexpected ColorMint encountered in the balancesByTx of address %s", addr.String())
 			continue
 		}
 		if col == *scColor && b == 1 {
 			// color of the scColor belongs to backlog only if more than 1 token
 			continue
 		}
-		allColorsAsTxid = append(allColorsAsTxid, (transaction.ID)(col))
+		allColorsAsTxid = append(allColorsAsTxid, (ledgerstate.TransactionID)(col))
 	}
 	wconn.log.Debugf("pushBacklogToWasp: color candidates for request transactions: %+v\n", allColorsAsTxid)
 
 	// for each color we try to load corresponding origin transaction.
 	// if the transaction exist and it is among the balancesByTx of the address,
 	// then send balancesByTx with the transaction as address update
-	sentTxs := make([]transaction.ID, 0)
+	sentTxs := make([]ledgerstate.TransactionID, 0)
 	for _, txid := range allColorsAsTxid {
-		tx := wconn.vtangle.GetConfirmedTransaction(&txid)
-		if tx == nil {
+		found := wconn.vtangle.GetTransaction(txid, func(tx *ledgerstate.Transaction) {
+			state, _ := wconn.vtangle.GetBranchInclusionState(txid)
+			if state != ledgerstate.Confirmed {
+				wconn.log.Warnf("pushBacklogToWasp: not confirmed %s", txid.String())
+				return
+			}
+
+			wconn.log.Debugf("pushBacklogToWasp: sending update with txid: %s\n", tx.ID().String())
+
+			if err := wconn.sendAddressUpdateToWasp(addr, balancesByTx, tx); err != nil {
+				wconn.log.Errorf("pushBacklogToWasp:sendAddressUpdateToWasp: %v", err)
+			} else {
+				sentTxs = append(sentTxs, txid)
+			}
+		})
+		if !found {
 			wconn.log.Warnf("pushBacklogToWasp: can't find the origin tx for the color %s. It may be snapshotted", txid.String())
-			continue
-		}
-
-		wconn.log.Debugf("pushBacklogToWasp: sending update with txid: %s\n", tx.ID().String())
-
-		if err := wconn.sendAddressUpdateToWasp(addr, balancesByTx, tx); err != nil {
-			wconn.log.Errorf("pushBacklogToWasp:sendAddressUpdateToWasp: %v", err)
-		} else {
-			sentTxs = append(sentTxs, txid)
 		}
 	}
 	wconn.log.Infof("pushed backlog to Wasp for addr %s. sent transactions: %+v", addr.String(), sentTxs)

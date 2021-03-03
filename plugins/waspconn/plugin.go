@@ -1,4 +1,3 @@
-// +build ignore
 package waspconn
 
 import (
@@ -7,8 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iotaledger/goshimmer/packages/ledgerstate"
 	"github.com/iotaledger/goshimmer/packages/shutdown"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
+	"github.com/iotaledger/goshimmer/packages/waspconn"
 	"github.com/iotaledger/goshimmer/packages/waspconn/connector"
 	"github.com/iotaledger/goshimmer/packages/waspconn/testing"
 	"github.com/iotaledger/goshimmer/packages/waspconn/utxodb"
@@ -41,22 +41,19 @@ func init() {
 }
 
 var (
-	app     *node.Plugin
+	plugin  *node.Plugin
 	appOnce sync.Once
 
-	PLUGINS = node.Plugins(
-		App(),
-	)
 	log *logger.Logger
 
-	vtangle valuetangle.ValueTangle
+	vtangle waspconn.ValueTangle
 )
 
-func App() *node.Plugin {
+func Plugin() *node.Plugin {
 	appOnce.Do(func() {
-		app = node.NewPlugin(PluginName, node.Enabled, configPlugin, runPlugin)
+		plugin = node.NewPlugin(PluginName, node.Enabled, configPlugin, runPlugin)
 	})
-	return app
+	return plugin
 }
 
 func configPlugin(plugin *node.Plugin) {
@@ -73,20 +70,16 @@ func configPlugin(plugin *node.Plugin) {
 		testing.Config(plugin, log, vtangle)
 		log.Infof("configured with UTXODB enabled")
 	} else {
-		vtangle = valuetangle.NewRealValueTangle()
+		vtangle = valuetangle.New()
 		log.Infof("configured for ValueTangle")
 	}
-	vtangle.OnTransactionConfirmed(func(tx *transaction.Transaction) {
+	vtangle.OnTransactionConfirmed(func(tx *ledgerstate.Transaction) {
 		log.Debugf("on transaction confirmed: %s", tx.ID().String())
 		connector.EventValueTransactionConfirmed.Trigger(tx)
 	})
-	vtangle.OnTransactionBooked(func(tx *transaction.Transaction, decisionPending bool) {
-		log.Debugf("on transaction booked: %s, decisionPending: %v", tx.ID().String(), decisionPending)
+	vtangle.OnTransactionBooked(func(tx *ledgerstate.Transaction) {
+		log.Debugf("on transaction booked: %s", tx.ID().String())
 		connector.EventValueTransactionBooked.Trigger(tx)
-	})
-	vtangle.OnTransactionRejected(func(tx *transaction.Transaction) {
-		log.Debugf("on transaction rejected: %s", tx.ID().String())
-		connector.EventValueTransactionRejected.Trigger(tx)
 	})
 }
 
@@ -125,7 +118,7 @@ func runPlugin(_ *node.Plugin) {
 			log.Infof("Detaching WaspConn from the Value Tangle..Done")
 		}()
 
-	}, shutdown.PriorityValueTangle) // TODO proper shutdown priority
+	}, shutdown.PriorityTangle) // TODO proper shutdown priority
 	if err != nil {
 		log.Errorf("failed to start WaspConn daemon: %v", err)
 	}

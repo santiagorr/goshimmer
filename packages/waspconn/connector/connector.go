@@ -1,4 +1,3 @@
-// +build ignore
 package connector
 
 import (
@@ -6,14 +5,11 @@ import (
 	"net"
 	"strings"
 
+	"github.com/iotaledger/goshimmer/packages/ledgerstate"
 	"github.com/iotaledger/goshimmer/packages/shutdown"
 	"github.com/iotaledger/goshimmer/packages/tangle"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/address"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/balance"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
 	"github.com/iotaledger/goshimmer/packages/waspconn"
 	"github.com/iotaledger/goshimmer/packages/waspconn/chopper"
-	"github.com/iotaledger/goshimmer/packages/waspconn/valuetangle"
 	"github.com/iotaledger/hive.go/daemon"
 	"github.com/iotaledger/hive.go/events"
 	"github.com/iotaledger/hive.go/logger"
@@ -23,23 +19,21 @@ import (
 type WaspConnector struct {
 	id                                 string
 	bconn                              *buffconn.BufferedConnection
-	subscriptions                      map[address.Address]balance.Color
+	subscriptions                      map[ledgerstate.Address]ledgerstate.Color
 	inTxChan                           chan interface{}
 	exitConnChan                       chan struct{}
 	receiveConfirmedTransactionClosure *events.Closure
 	receiveBookedTransactionClosure    *events.Closure
-	receiveRejectedTransactionClosure  *events.Closure
 	receiveWaspMessageClosure          *events.Closure
 	messageChopper                     *chopper.Chopper
 	log                                *logger.Logger
-	vtangle                            valuetangle.ValueTangle
+	vtangle                            waspconn.ValueTangle
 }
 
-type wrapConfirmedTx *transaction.Transaction
-type wrapBookedTx *transaction.Transaction
-type wrapRejectedTx *transaction.Transaction
+type wrapConfirmedTx *ledgerstate.Transaction
+type wrapBookedTx *ledgerstate.Transaction
 
-func Run(conn net.Conn, log *logger.Logger, vtangle valuetangle.ValueTangle) {
+func Run(conn net.Conn, log *logger.Logger, vtangle waspconn.ValueTangle) {
 	wconn := &WaspConnector{
 		bconn:          buffconn.NewBufferedConnection(conn, tangle.MaxMessageSize),
 		exitConnChan:   make(chan struct{}),
@@ -59,7 +53,7 @@ func Run(conn net.Conn, log *logger.Logger, vtangle valuetangle.ValueTangle) {
 		}
 
 		go wconn.detach()
-	}, shutdown.PriorityValueTangle) // TODO proper priority
+	}, shutdown.PriorityTangle) // TODO proper priority
 
 	if err != nil {
 		close(wconn.exitConnChan)
@@ -83,19 +77,15 @@ func (wconn *WaspConnector) SetId(id string) {
 }
 
 func (wconn *WaspConnector) attach() {
-	wconn.subscriptions = make(map[address.Address]balance.Color)
+	wconn.subscriptions = make(map[ledgerstate.Address]ledgerstate.Color)
 	wconn.inTxChan = make(chan interface{})
 
-	wconn.receiveConfirmedTransactionClosure = events.NewClosure(func(vtx *transaction.Transaction) {
+	wconn.receiveConfirmedTransactionClosure = events.NewClosure(func(vtx *ledgerstate.Transaction) {
 		wconn.inTxChan <- wrapConfirmedTx(vtx)
 	})
 
-	wconn.receiveBookedTransactionClosure = events.NewClosure(func(vtx *transaction.Transaction) {
+	wconn.receiveBookedTransactionClosure = events.NewClosure(func(vtx *ledgerstate.Transaction) {
 		wconn.inTxChan <- wrapBookedTx(vtx)
-	})
-
-	wconn.receiveRejectedTransactionClosure = events.NewClosure(func(vtx *transaction.Transaction) {
-		wconn.inTxChan <- wrapRejectedTx(vtx)
 	})
 
 	wconn.receiveWaspMessageClosure = events.NewClosure(func(data []byte) {
@@ -105,7 +95,6 @@ func (wconn *WaspConnector) attach() {
 	// attach connector to the flow of incoming value transactions
 	EventValueTransactionConfirmed.Attach(wconn.receiveConfirmedTransactionClosure)
 	EventValueTransactionBooked.Attach(wconn.receiveBookedTransactionClosure)
-	EventValueTransactionRejected.Attach(wconn.receiveRejectedTransactionClosure)
 
 	wconn.bconn.Events.ReceiveMessage.Attach(wconn.receiveWaspMessageClosure)
 
@@ -131,9 +120,6 @@ func (wconn *WaspConnector) attach() {
 			case wrapBookedTx:
 				wconn.processBookedTransactionFromNode(tvtx)
 
-			case wrapRejectedTx:
-				wconn.processRejectedTransactionFromNode(tvtx)
-
 			default:
 				wconn.log.Panicf("wrong type")
 			}
@@ -144,7 +130,6 @@ func (wconn *WaspConnector) attach() {
 func (wconn *WaspConnector) detach() {
 	EventValueTransactionConfirmed.Detach(wconn.receiveConfirmedTransactionClosure)
 	EventValueTransactionBooked.Detach(wconn.receiveBookedTransactionClosure)
-	EventValueTransactionRejected.Detach(wconn.receiveRejectedTransactionClosure)
 	wconn.bconn.Events.ReceiveMessage.Detach(wconn.receiveWaspMessageClosure)
 
 	wconn.messageChopper.Close()
@@ -153,33 +138,33 @@ func (wconn *WaspConnector) detach() {
 	wconn.log.Debugf("detached waspconn")
 }
 
-func (wconn *WaspConnector) subscribe(addr *address.Address, color *balance.Color) {
-	_, ok := wconn.subscriptions[*addr]
+func (wconn *WaspConnector) subscribe(addr ledgerstate.Address, color ledgerstate.Color) {
+	_, ok := wconn.subscriptions[addr]
 	if !ok {
 		wconn.log.Infof("subscribed to address %s with color %s", addr.String(), color.String())
-		wconn.subscriptions[*addr] = *color
+		wconn.subscriptions[addr] = color
 	}
 }
 
-func (wconn *WaspConnector) isSubscribed(addr *address.Address) bool {
-	_, ok := wconn.subscriptions[*addr]
+func (wconn *WaspConnector) isSubscribed(addr ledgerstate.Address) bool {
+	_, ok := wconn.subscriptions[addr]
 	return ok
 }
 
-func (wconn *WaspConnector) txSubscribedAddresses(tx *transaction.Transaction) []address.Address {
-	ret := make([]address.Address, 0)
-	tx.Outputs().ForEach(func(addr address.Address, _ []*balance.Balance) bool {
-		if wconn.isSubscribed(&addr) {
+func (wconn *WaspConnector) txSubscribedAddresses(tx *ledgerstate.Transaction) []ledgerstate.Address {
+	ret := make([]ledgerstate.Address, 0)
+	for _, output := range tx.Essence().Outputs() {
+		addr := output.Address()
+		if wconn.isSubscribed(addr) {
 			ret = append(ret, addr)
 		}
-		return true
-	})
+	}
 	return ret
 }
 
 // processConfirmedTransactionFromNode receives only confirmed transactions
 // it parses SC transaction incoming from the node. Forwards it to Wasp if subscribed
-func (wconn *WaspConnector) processConfirmedTransactionFromNode(tx *transaction.Transaction) {
+func (wconn *WaspConnector) processConfirmedTransactionFromNode(tx *ledgerstate.Transaction) {
 	// determine if transaction contains any of subscribed addresses in its outputs
 	wconn.log.Debugw("processConfirmedTransactionFromNode", "txid", tx.ID().String())
 
@@ -193,14 +178,10 @@ func (wconn *WaspConnector) processConfirmedTransactionFromNode(tx *transaction.
 	wconn.log.Debugf("txid %s contains %d subscribed addresses", tx.ID().String(), len(subscribedOutAddresses))
 
 	for i := range subscribedOutAddresses {
-		outs, err := wconn.vtangle.GetConfirmedAddressOutputs(subscribedOutAddresses[i])
-		if err != nil {
-			wconn.log.Error(err)
-			continue
-		}
+		outs := wconn.vtangle.GetAddressOutputs(subscribedOutAddresses[i])
 		bals := waspconn.OutputsToBalances(outs)
-		err = wconn.sendAddressUpdateToWasp(
-			&subscribedOutAddresses[i],
+		err := wconn.sendAddressUpdateToWasp(
+			subscribedOutAddresses[i],
 			bals,
 			tx,
 		)
@@ -213,65 +194,55 @@ func (wconn *WaspConnector) processConfirmedTransactionFromNode(tx *transaction.
 	}
 }
 
-func (wconn *WaspConnector) processBookedTransactionFromNode(tx *transaction.Transaction) {
+func (wconn *WaspConnector) processBookedTransactionFromNode(tx *ledgerstate.Transaction) {
 	addrs := wconn.txSubscribedAddresses(tx)
 	if len(addrs) == 0 {
 		return
 	}
 	txid := tx.ID()
-	if err := wconn.sendTxInclusionLevelToWasp(waspconn.TransactionInclusionLevelBooked, &txid, addrs); err != nil {
+	if err := wconn.sendBranchInclusionStateToWasp(ledgerstate.Pending, txid, addrs); err != nil {
 		wconn.log.Errorf("processBookedTransactionFromNode: %v", err)
 	} else {
 		wconn.log.Infof("booked tx -> Wasp. txid: %s", tx.ID().String())
 	}
 }
 
-func (wconn *WaspConnector) processRejectedTransactionFromNode(tx *transaction.Transaction) {
-	addrs := wconn.txSubscribedAddresses(tx)
-	if len(addrs) == 0 {
-		return
-	}
-	txid := tx.ID()
-	if err := wconn.sendTxInclusionLevelToWasp(waspconn.TransactionInclusionLevelRejected, &txid, addrs); err != nil {
-		wconn.log.Errorf("processRejectedTransactionFromNode: %v", err)
-	} else {
-		wconn.log.Infof("rejected tx -> Wasp. txid: %s", tx.ID().String())
-	}
-}
-
-func (wconn *WaspConnector) getConfirmedTransaction(txid *transaction.ID) {
+func (wconn *WaspConnector) getConfirmedTransaction(txid ledgerstate.TransactionID) {
 	wconn.log.Debugf("requested transaction id = %s", txid.String())
 
-	tx := wconn.vtangle.GetConfirmedTransaction(txid)
-	if tx == nil {
+	found := wconn.vtangle.GetTransaction(txid, func(tx *ledgerstate.Transaction) {
+		state, _ := wconn.vtangle.GetBranchInclusionState(txid)
+		if state != ledgerstate.Confirmed {
+			wconn.log.Warnf("GetConfirmedTransaction: not confirmed %s", txid.String())
+			return
+		}
+		if err := wconn.sendConfirmedTransactionToWasp(tx); err != nil {
+			wconn.log.Errorf("sendConfirmedTransactionToWasp: %v", err)
+			return
+		}
+		wconn.log.Infof("confirmed tx -> Wasp. txid = %s", txid.String())
+	})
+	if !found {
 		wconn.log.Warnf("GetConfirmedTransaction: not found %s", txid.String())
 		return
 	}
-	if err := wconn.sendConfirmedTransactionToWasp(tx); err != nil {
-		wconn.log.Errorf("sendConfirmedTransactionToWasp: %v", err)
-		return
-	}
-	wconn.log.Infof("confirmed tx -> Wasp. txid = %s", txid.String())
 }
 
-func (wconn *WaspConnector) getTxInclusionLevel(txid *transaction.ID, addr *address.Address) {
-	level := wconn.vtangle.GetTxInclusionLevel(txid)
-	if level == waspconn.TransactionInclusionLevelUndef {
+func (wconn *WaspConnector) getBranchInclusionState(txid ledgerstate.TransactionID, addr ledgerstate.Address) {
+	state, found := wconn.vtangle.GetBranchInclusionState(txid)
+	if !found {
 		return
 	}
-	if err := wconn.sendTxInclusionLevelToWasp(level, txid, []address.Address{*addr}); err != nil {
-		wconn.log.Errorf("sendTxInclusionLevelToWasp: %v", err)
+	if err := wconn.sendBranchInclusionStateToWasp(state, txid, []ledgerstate.Address{addr}); err != nil {
+		wconn.log.Errorf("sendBranchInclusionStateToWasp: %v", err)
 		return
 	}
 }
 
-func (wconn *WaspConnector) getAddressBalance(addr *address.Address) {
+func (wconn *WaspConnector) getAddressBalance(addr ledgerstate.Address) {
 	wconn.log.Debugf("getAddressBalance request for address: %s", addr.String())
 
-	outputs, err := wconn.vtangle.GetConfirmedAddressOutputs(*addr)
-	if err != nil {
-		panic(err)
-	}
+	outputs := wconn.vtangle.GetAddressOutputs(addr)
 	if len(outputs) == 0 {
 		return
 	}
@@ -284,7 +255,7 @@ func (wconn *WaspConnector) getAddressBalance(addr *address.Address) {
 	}
 }
 
-func (wconn *WaspConnector) postTransaction(tx *transaction.Transaction, fromSC *address.Address, fromLeader uint16) {
+func (wconn *WaspConnector) postTransaction(tx *ledgerstate.Transaction, fromSC ledgerstate.Address, fromLeader uint16) {
 	if err := wconn.vtangle.PostTransaction(tx); err != nil {
 		wconn.log.Warnf("%v: %s", err, tx.ID().String())
 		return

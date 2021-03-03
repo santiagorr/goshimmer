@@ -1,4 +1,3 @@
-// +build ignore
 package apilib
 
 import (
@@ -6,14 +5,14 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/address"
+	"github.com/iotaledger/goshimmer/packages/ledgerstate"
 )
 
 type RequestFundsResponse struct {
 	Err string `json:"err"`
 }
 
-func RequestFunds(netLoc string, address *address.Address) error {
+func RequestFunds(netLoc string, address ledgerstate.Address) error {
 	url := fmt.Sprintf("http://%s/utxodb/requestfunds/%s", netLoc, address.String())
 	resp, err := http.Get(url)
 	if err != nil {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	// "github.com/iotaledger/goshimmer/packages/waspconn"
 	_ "net/http/pprof"
 
 	"github.com/iotaledger/goshimmer/plugins"
@@ -14,6 +13,5 @@ func main() {
 		plugins.Research,
 		plugins.UI,
 		plugins.WebAPI,
-		//waspconn.PLUGINS,
 	)
 }

@@ -146,6 +146,12 @@ func (u *UtxoDB) checkLedgerBalance() {
 }
 
 // ValidateTransaction check is the transaction can be added to the ledger
+func (u *UtxoDB) ValidateTransaction(tx *ledgerstate.Transaction) error {
+	u.mutex.Lock()
+	defer u.mutex.Unlock()
+	return u.validate(tx)
+}
+
 func (u *UtxoDB) validate(tx *ledgerstate.Transaction) error {
 	inbals, insum, err := u.collectInputBalances(tx)
 	if err != nil {

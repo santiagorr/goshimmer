@@ -1,4 +1,3 @@
-// +build ignore
 package apilib
 
 import (
@@ -7,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
+	"github.com/iotaledger/goshimmer/packages/ledgerstate"
 	"github.com/mr-tron/base58"
 )
 
@@ -19,7 +18,7 @@ type PostTransactionResponse struct {
 	Err string
 }
 
-func PostTransaction(netLoc string, tx *transaction.Transaction) error {
+func PostTransaction(netLoc string, tx *ledgerstate.Transaction) error {
 	req := &PostTransactionRequest{Tx: base58.Encode(tx.Bytes())}
 	data, err := json.Marshal(req)
 	if err != nil {

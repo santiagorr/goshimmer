@@ -4,8 +4,8 @@ package connector
 // SPDX-License-Identifier: Apache-2.0
 
 import (
-	"github.com/iotaledger/goshimmer/packages/waspconn"
 	"github.com/iotaledger/goshimmer/packages/tangle"
+	"github.com/iotaledger/goshimmer/packages/waspconn"
 )
 
 // process messages received from the Wasp
@@ -34,26 +34,26 @@ func (wconn *WaspConnector) processMsgDataFromWasp(data []byte) {
 		}
 
 	case *waspconn.WaspToNodeTransactionMsg:
-		wconn.postTransaction(msgt.Tx, &msgt.SCAddress, msgt.Leader)
+		wconn.postTransaction(msgt.Tx, msgt.SCAddress, msgt.Leader)
 
 	case *waspconn.WaspToNodeSubscribeMsg:
 		for _, addrCol := range msgt.AddressesWithColors {
-			wconn.subscribe(&addrCol.Address, &addrCol.Color)
+			wconn.subscribe(addrCol.Address, addrCol.Color)
 		}
 		go func() {
 			for _, addrCol := range msgt.AddressesWithColors {
-				wconn.pushBacklogToWasp(&addrCol.Address, &addrCol.Color)
+				wconn.pushBacklogToWasp(addrCol.Address, &addrCol.Color)
 			}
 		}()
 
 	case *waspconn.WaspToNodeGetConfirmedTransactionMsg:
-		wconn.getConfirmedTransaction(&msgt.TxId)
+		wconn.getConfirmedTransaction(msgt.TxId)
 
-	case *waspconn.WaspToNodeGetTxInclusionLevelMsg:
-		wconn.getTxInclusionLevel(&msgt.TxId, &msgt.SCAddress)
+	case *waspconn.WaspToNodeGetBranchInclusionStateMsg:
+		wconn.getBranchInclusionState(msgt.TxId, msgt.SCAddress)
 
 	case *waspconn.WaspToNodeGetOutputsMsg:
-		wconn.getAddressBalance(&msgt.Address)
+		wconn.getAddressBalance(msgt.Address)
 
 	case *waspconn.WaspToNodeSetIdMsg:
 		wconn.SetId(msgt.Waspid)

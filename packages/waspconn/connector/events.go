@@ -1,8 +1,7 @@
-// +build ignore
 package connector
 
 import (
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
+	"github.com/iotaledger/goshimmer/packages/ledgerstate"
 	"github.com/iotaledger/hive.go/events"
 )
 
@@ -11,17 +10,13 @@ import (
 var (
 	EventValueTransactionConfirmed *events.Event
 	EventValueTransactionBooked    *events.Event
-	EventValueTransactionRejected  *events.Event
 )
 
 func init() {
 	EventValueTransactionConfirmed = events.NewEvent(func(handler interface{}, params ...interface{}) {
-		handler.(func(_ *transaction.Transaction))(params[0].(*transaction.Transaction))
+		handler.(func(_ *ledgerstate.Transaction))(params[0].(*ledgerstate.Transaction))
 	})
 	EventValueTransactionBooked = events.NewEvent(func(handler interface{}, params ...interface{}) {
-		handler.(func(_ *transaction.Transaction))(params[0].(*transaction.Transaction))
-	})
-	EventValueTransactionRejected = events.NewEvent(func(handler interface{}, params ...interface{}) {
-		handler.(func(_ *transaction.Transaction))(params[0].(*transaction.Transaction))
+		handler.(func(_ *ledgerstate.Transaction))(params[0].(*ledgerstate.Transaction))
 	})
 }

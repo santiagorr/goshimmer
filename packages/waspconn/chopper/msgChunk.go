@@ -4,10 +4,9 @@ package chopper
 // SPDX-License-Identifier: Apache-2.0
 
 import (
-	"bytes"
 	"fmt"
 
-	"github.com/iotaledger/goshimmer/packages/waspconn"
+	"github.com/iotaledger/hive.go/marshalutil"
 )
 
 // special wrapper message for chunks of larger than buffer messages
@@ -19,30 +18,33 @@ type msgChunk struct {
 }
 
 func (c *msgChunk) encode() []byte {
-	var buf bytes.Buffer
-
-	_ = waspconn.WriteUint32(&buf, c.msgId)
-	_ = waspconn.WriteByte(&buf, c.numChunks)
-	_ = waspconn.WriteByte(&buf, c.chunkSeqNum)
-	_ = waspconn.WriteBytes16(&buf, c.data)
-	return buf.Bytes()
+	m := marshalutil.New()
+	m.WriteUint32(c.msgId)
+	m.WriteByte(c.numChunks)
+	m.WriteByte(c.chunkSeqNum)
+	m.WriteUint16(uint16(len(c.data)))
+	m.WriteBytes(c.data)
+	return m.Bytes()
 }
 
 func (c *msgChunk) decode(data []byte, maxChunkSizeWithoutHeader int) error {
-	rdr := bytes.NewReader(data)
-	if err := waspconn.ReadUint32(rdr, &c.msgId); err != nil {
+	m := marshalutil.New(data)
+	var err error
+	if c.msgId, err = m.ReadUint32(); err != nil {
 		return err
 	}
-	if err := waspconn.ReadByte(rdr, &c.numChunks); err != nil {
+	if c.numChunks, err = m.ReadByte(); err != nil {
 		return err
 	}
-	if err := waspconn.ReadByte(rdr, &c.chunkSeqNum); err != nil {
+	if c.chunkSeqNum, err = m.ReadByte(); err != nil {
 		return err
 	}
-	if data, err := waspconn.ReadBytes16(rdr); err != nil {
+	var size uint16
+	if size, err = m.ReadUint16(); err != nil {
 		return err
-	} else {
-		c.data = data
+	}
+	if c.data, err = m.ReadBytes(int(size)); err != nil {
+		return err
 	}
 	if c.chunkSeqNum >= c.numChunks {
 		return fmt.Errorf("wrong data chunk format")

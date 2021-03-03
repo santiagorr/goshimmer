@@ -1,25 +1,23 @@
-// +build ignore
 package testing
 
 import (
 	"fmt"
 	"net/http"
 
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/address"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
+	"github.com/iotaledger/goshimmer/packages/ledgerstate"
+	"github.com/iotaledger/goshimmer/packages/waspconn"
 	"github.com/iotaledger/goshimmer/packages/waspconn/apilib"
-	"github.com/iotaledger/goshimmer/packages/waspconn/valuetangle"
 	"github.com/iotaledger/goshimmer/plugins/gracefulshutdown"
 	"github.com/iotaledger/goshimmer/plugins/webapi"
 	"github.com/labstack/echo"
 	"github.com/mr-tron/base58"
 )
 
-func addEndpoints(vtangle valuetangle.ValueTangle) {
+func addEndpoints(vtangle waspconn.ValueTangle) {
 	t := &testingHandler{vtangle}
 
 	webapi.Server().GET("/utxodb/outputs/:address", t.handleGetAddressOutputs)
-	webapi.Server().GET("/utxodb/confirmed/:txid", t.handleIsConfirmed)
+	webapi.Server().GET("/utxodb/inclusionstate/:txid", t.handleInclusionState)
 	webapi.Server().POST("/utxodb/tx", t.handlePostTransaction)
 	webapi.Server().GET("/utxodb/requestfunds/:address", t.handleRequestFunds)
 	webapi.Server().GET("/adm/shutdown", handleShutdown)
@@ -28,30 +26,28 @@ func addEndpoints(vtangle valuetangle.ValueTangle) {
 }
 
 type testingHandler struct {
-	vtangle valuetangle.ValueTangle
+	vtangle waspconn.ValueTangle
 }
 
 func (t *testingHandler) handleGetAddressOutputs(c echo.Context) error {
 	log.Debugw("handleGetAddressOutputs")
-	addr, err := address.FromBase58(c.Param("address"))
+	addr, err := ledgerstate.AddressFromBase58EncodedString(c.Param("address"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, &apilib.GetAccountOutputsResponse{Err: err.Error()})
 	}
-	outputs, err := t.vtangle.GetConfirmedAddressOutputs(addr)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, &apilib.GetAccountOutputsResponse{Err: err.Error()})
-	}
+	outputs := t.vtangle.GetAddressOutputs(addr)
 	log.Debugf("handleGetAddressOutputs: addr %s from utxodb %+v", addr.String(), outputs)
 
 	out := make(map[string][]apilib.OutputBalance)
 	for txOutId, txOutputs := range outputs {
-		txOut := make([]apilib.OutputBalance, len(txOutputs))
-		for i, txOutput := range txOutputs {
-			txOut[i] = apilib.OutputBalance{
-				Value: txOutput.Value,
-				Color: transaction.ID(txOutput.Color).String(),
-			}
-		}
+		txOut := make([]apilib.OutputBalance, 0)
+		txOutputs.ForEach(func(color ledgerstate.Color, balance uint64) bool {
+			txOut = append(txOut, apilib.OutputBalance{
+				Value: balance,
+				Color: color.Base58(),
+			})
+			return true
+		})
 		out[txOutId.String()] = txOut
 	}
 	log.Debugw("handleGetAddressOutputs", "sending", out)
@@ -73,7 +69,7 @@ func (t *testingHandler) handlePostTransaction(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, &apilib.PostTransactionResponse{Err: err.Error()})
 	}
 
-	tx, _, err := transaction.FromBytes(txBytes)
+	tx, _, err := ledgerstate.TransactionFromBytes(txBytes)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, &apilib.PostTransactionResponse{Err: err.Error()})
 	}
@@ -94,23 +90,23 @@ func handleShutdown(c echo.Context) error {
 	return nil
 }
 
-func (t *testingHandler) handleIsConfirmed(c echo.Context) error {
-	log.Debugw("handleIsConfirmed")
-	txid, err := transaction.IDFromBase58(c.Param("txid"))
+func (t *testingHandler) handleInclusionState(c echo.Context) error {
+	log.Debugw("handleInclusionState")
+	txid, err := ledgerstate.TransactionIDFromBase58(c.Param("txid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, &apilib.IsConfirmedResponse{Err: err.Error()})
+		return c.JSON(http.StatusBadRequest, &apilib.InclusionStateResponse{Err: err.Error()})
 	}
-	confirmed, err := t.vtangle.IsConfirmed(&txid)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, &apilib.IsConfirmedResponse{Err: err.Error()})
+	state, found := t.vtangle.GetBranchInclusionState(txid)
+	if !found {
+		return c.JSON(http.StatusNotFound, &apilib.InclusionStateResponse{Err: "Not found"})
 	}
-	log.Debugf("handleIsConfirmed: txid %s confirmed = %v", txid.String(), confirmed)
+	log.Debugf("handleInclusionState: txid %s state = %v", txid.String(), state)
 
-	return c.JSON(http.StatusOK, &apilib.IsConfirmedResponse{Confirmed: confirmed})
+	return c.JSON(http.StatusOK, &apilib.InclusionStateResponse{State: state})
 }
 
 func (t *testingHandler) handleRequestFunds(c echo.Context) error {
-	addr, err := address.FromBase58(c.Param("address"))
+	addr, err := ledgerstate.AddressFromBase58EncodedString(c.Param("address"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, &apilib.RequestFundsResponse{Err: err.Error()})
 	}

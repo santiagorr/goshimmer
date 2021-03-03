@@ -1,21 +1,17 @@
-// +build ignore
 package utxodb
 
 import (
 	"fmt"
-	"github.com/iotaledger/goshimmer/packages/waspconn"
 	"math/rand"
 	"sync"
 	"time"
 
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/address"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/balance"
-	"github.com/iotaledger/goshimmer/packages/valuetransfers/packages/transaction"
+	"github.com/iotaledger/goshimmer/packages/ledgerstate"
 )
 
 type pendingTransaction struct {
 	confirmDeadline time.Time
-	tx              *transaction.Transaction
+	tx              *ledgerstate.Transaction
 	hasConflicts    bool
 }
 
@@ -25,15 +21,15 @@ type ConfirmEmulator struct {
 	confirmTime            time.Duration
 	randomize              bool
 	confirmFirstInConflict bool
-	pendingTransactions    map[transaction.ID]*pendingTransaction
+	pendingTransactions    map[ledgerstate.TransactionID]*pendingTransaction
 	mutex                  sync.Mutex
-	txConfirmedCallback    func(tx *transaction.Transaction)
+	txConfirmedCallback    func(tx *ledgerstate.Transaction)
 }
 
 func NewConfirmEmulator(confirmTime time.Duration, randomize bool, confirmFirstInConflict bool) *ConfirmEmulator {
 	ce := &ConfirmEmulator{
 		UtxoDB:                 New(),
-		pendingTransactions:    make(map[transaction.ID]*pendingTransaction),
+		pendingTransactions:    make(map[ledgerstate.TransactionID]*pendingTransaction),
 		confirmTime:            confirmTime,
 		randomize:              randomize,
 		confirmFirstInConflict: confirmFirstInConflict,
@@ -42,13 +38,13 @@ func NewConfirmEmulator(confirmTime time.Duration, randomize bool, confirmFirstI
 	return ce
 }
 
-func (ce *ConfirmEmulator) transactionConfirmed(tx *transaction.Transaction) {
+func (ce *ConfirmEmulator) transactionConfirmed(tx *ledgerstate.Transaction) {
 	if ce.txConfirmedCallback != nil {
 		ce.txConfirmedCallback(tx)
 	}
 }
 
-func (ce *ConfirmEmulator) PostTransaction(tx *transaction.Transaction) error {
+func (ce *ConfirmEmulator) PostTransaction(tx *ledgerstate.Transaction) error {
 	ce.mutex.Lock()
 	defer ce.mutex.Unlock()
 
@@ -64,7 +60,7 @@ func (ce *ConfirmEmulator) PostTransaction(tx *transaction.Transaction) error {
 		return err
 	}
 	for txid, ptx := range ce.pendingTransactions {
-		if AreConflicting(tx, ptx.tx) {
+		if areConflicting(tx, ptx.tx) {
 			ptx.hasConflicts = true
 			return fmt.Errorf("utxodb.ConfirmEmulator rejected: new tx %s conflicts with pending tx %s", tx.ID().String(), txid.String())
 		}
@@ -89,7 +85,7 @@ func (ce *ConfirmEmulator) PostTransaction(tx *transaction.Transaction) error {
 const loopPeriod = 500 * time.Millisecond
 
 func (ce *ConfirmEmulator) confirmLoop() {
-	maturedTxs := make([]transaction.ID, 0)
+	maturedTxs := make([]ledgerstate.TransactionID, 0)
 	for {
 		time.Sleep(loopPeriod)
 
@@ -130,42 +126,65 @@ func (ce *ConfirmEmulator) confirmLoop() {
 	}
 }
 
-func (ce *ConfirmEmulator) GetConfirmedAddressOutputs(addr address.Address) (map[transaction.OutputID][]*balance.Balance, error) {
-	return ce.UtxoDB.GetAddressOutputs(addr), nil
+func (ce *ConfirmEmulator) GetAddressOutputs(addr ledgerstate.Address) map[ledgerstate.OutputID]*ledgerstate.ColoredBalances {
+	ret := make(map[ledgerstate.OutputID]*ledgerstate.ColoredBalances)
+	for _, output := range ce.UtxoDB.GetAddressOutputs(addr) {
+		ret[output.ID()] = output.Balances()
+	}
+	return ret
 }
 
-func (ce *ConfirmEmulator) IsConfirmed(txid *transaction.ID) (bool, error) {
+func (ce *ConfirmEmulator) IsConfirmed(txid *ledgerstate.TransactionID) (bool, error) {
 	return ce.UtxoDB.IsConfirmed(txid), nil
 }
 
-func (ce *ConfirmEmulator) GetConfirmedTransaction(txid *transaction.ID) *transaction.Transaction {
-	tx, _ := ce.UtxoDB.GetTransaction(*txid)
-	return tx
-}
-
-func (ce *ConfirmEmulator) GetTxInclusionLevel(txid *transaction.ID) byte {
-	_, ok := ce.UtxoDB.GetTransaction(*txid)
+func (ce *ConfirmEmulator) GetTransaction(txid ledgerstate.TransactionID, f func(*ledgerstate.Transaction)) bool {
+	tx, ok := ce.UtxoDB.GetTransaction(txid)
 	if ok {
-		return waspconn.TransactionInclusionLevelConfirmed
+		f(tx)
 	}
-	return waspconn.TransactionInclusionLevelUndef
+	return ok
 }
 
-func (ce *ConfirmEmulator) RequestFunds(target address.Address) error {
+func (ce *ConfirmEmulator) GetBranchInclusionState(txid ledgerstate.TransactionID) (ledgerstate.InclusionState, bool) {
+	_, ok := ce.UtxoDB.GetTransaction(txid)
+	if ok {
+		return ledgerstate.Confirmed, true
+	}
+	return ledgerstate.Pending, false
+}
+
+func (ce *ConfirmEmulator) RequestFunds(target ledgerstate.Address) error {
 	_, err := ce.UtxoDB.RequestFunds(target)
 	return err
 }
 
-func (ce *ConfirmEmulator) OnTransactionConfirmed(cb func(tx *transaction.Transaction)) {
+func (ce *ConfirmEmulator) OnTransactionConfirmed(cb func(tx *ledgerstate.Transaction)) {
 	ce.txConfirmedCallback = cb
 }
 
-func (ce *ConfirmEmulator) OnTransactionBooked(f func(_ *transaction.Transaction, _ bool)) {
-}
-
-func (ce *ConfirmEmulator) OnTransactionRejected(f func(tx *transaction.Transaction)) {
+func (ce *ConfirmEmulator) OnTransactionBooked(f func(_ *ledgerstate.Transaction)) {
 }
 
 func (ce *ConfirmEmulator) Detach() {
 	// TODO: stop the confirmLoop
+}
+
+// areConflicting checks if two transactions double-spend
+func areConflicting(tx1, tx2 *ledgerstate.Transaction) bool {
+	if tx1.ID() == tx2.ID() {
+		return true
+	}
+	ret := false
+	for _, oid1 := range tx1.Essence().Inputs() {
+		for _, oid2 := range tx2.Essence().Inputs() {
+			if oid1 == oid2 {
+				ret = true
+				return false
+			}
+			return true
+		}
+		return true
+	}
+	return ret
 }
