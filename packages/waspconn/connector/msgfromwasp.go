@@ -16,9 +16,9 @@ func (wconn *WaspConnector) processMsgDataFromWasp(data []byte) {
 		wconn.log.Errorf("DecodeMsg: %v", err)
 		return
 	}
-	switch msgt := msg.(type) {
+	switch msg := msg.(type) {
 	case *waspconn.WaspMsgChunk:
-		finalMsg, err := wconn.messageChopper.IncomingChunk(msgt.Data, tangle.MaxMessageSize, waspconn.ChunkMessageHeaderSize)
+		finalMsg, err := wconn.messageChopper.IncomingChunk(msg.Data, tangle.MaxMessageSize, waspconn.ChunkMessageHeaderSize)
 		if err != nil {
 			wconn.log.Errorf("DecodeMsg: %v", err)
 			return
@@ -28,35 +28,35 @@ func (wconn *WaspConnector) processMsgDataFromWasp(data []byte) {
 		}
 
 	case *waspconn.WaspPingMsg:
-		wconn.log.Debugf("PING %d received", msgt.Id)
-		if err := wconn.sendMsgToWasp(msgt); err != nil {
+		wconn.log.Debugf("PING %d received", msg.Id)
+		if err := wconn.sendMsgToWasp(msg); err != nil {
 			wconn.log.Errorf("responding to ping: %v", err)
 		}
 
 	case *waspconn.WaspToNodeTransactionMsg:
-		wconn.postTransaction(msgt.Tx, msgt.SCAddress, msgt.Leader)
+		wconn.postTransaction(msg.Tx, msg.SCAddress, msg.Leader)
 
 	case *waspconn.WaspToNodeSubscribeMsg:
-		for _, addrCol := range msgt.AddressesWithColors {
+		for _, addrCol := range msg.AddressesWithColors {
 			wconn.subscribe(addrCol.Address, addrCol.Color)
 		}
 		go func() {
-			for _, addrCol := range msgt.AddressesWithColors {
-				wconn.pushBacklogToWasp(addrCol.Address, &addrCol.Color)
+			for _, addrCol := range msg.AddressesWithColors {
+				wconn.pushBacklogToWasp(addrCol.Address, addrCol.Color)
 			}
 		}()
 
 	case *waspconn.WaspToNodeGetConfirmedTransactionMsg:
-		wconn.getConfirmedTransaction(msgt.TxId)
+		wconn.getConfirmedTransaction(msg.TxId)
 
 	case *waspconn.WaspToNodeGetBranchInclusionStateMsg:
-		wconn.getBranchInclusionState(msgt.TxId, msgt.SCAddress)
+		wconn.getBranchInclusionState(msg.TxId, msg.SCAddress)
 
 	case *waspconn.WaspToNodeGetOutputsMsg:
-		wconn.getAddressBalance(msgt.Address)
+		wconn.getAddressBalance(msg.Address)
 
 	case *waspconn.WaspToNodeSetIdMsg:
-		wconn.SetId(msgt.Waspid)
+		wconn.SetId(msg.Waspid)
 
 	default:
 		panic("wrong msg type")

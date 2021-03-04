@@ -71,7 +71,7 @@ func (wconn *WaspConnector) sendBranchInclusionStateToWasp(state ledgerstate.Inc
 }
 
 // query outputs database and collects transactions containing unprocessed requests
-func (wconn *WaspConnector) pushBacklogToWasp(addr ledgerstate.Address, scColor *ledgerstate.Color) {
+func (wconn *WaspConnector) pushBacklogToWasp(addr ledgerstate.Address, scColor ledgerstate.Color) {
 	outs := wconn.vtangle.GetAddressOutputs(addr)
 	if len(outs) == 0 {
 		return
@@ -94,7 +94,7 @@ func (wconn *WaspConnector) pushBacklogToWasp(addr ledgerstate.Address, scColor 
 			wconn.log.Warnf("pushBacklogToWasp: unexpected ColorMint encountered in the balancesByTx of address %s", addr.String())
 			continue
 		}
-		if col == *scColor && b == 1 {
+		if col == scColor && b == 1 {
 			// color of the scColor belongs to backlog only if more than 1 token
 			continue
 		}

@@ -1,8 +1,8 @@
-# WaspConn dApp (plugin) for Goshimmer
+# WaspConn plugin for Goshimmer
 
 ## Purpose
 
-The _WaspConn_ dApp handles connection with Wasp nodes, it is a Wasp proxy
+The _WaspConn_ plugin handles connection with Wasp nodes, it is a Wasp proxy
 in Goshimmer. 
 
 One or several Wasp nodes can be connected to one Goshimmer node. The Wasp node
@@ -29,7 +29,7 @@ the genesis address and 10 testing addresses. This is completely deterministic a
 ## Dependency
 
 WaspConn is not dependent on Wasp. Instead, Wasp has Goshimmer with WaspConn 
-dApp (`wasp` branch of the Goshimmer) as dependency.
+plugin (`wasp` branch of the Goshimmer) as dependency.
 
 WaspConn and Goshimmer are unaware about smart contract transactions. They treat it as just
 ordinary value transaction with data payloads. 
