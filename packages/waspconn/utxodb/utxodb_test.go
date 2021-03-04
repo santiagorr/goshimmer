@@ -1,11 +1,12 @@
 package utxodb
 
 import (
+	"testing"
+
 	"github.com/iotaledger/goshimmer/packages/ledgerstate"
-	"github.com/iotaledger/wasp/waspconn-tmp/txutil"
+	"github.com/iotaledger/goshimmer/packages/waspconn/txutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestBasic(t *testing.T) {
